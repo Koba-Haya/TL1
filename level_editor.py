@@ -2,8 +2,9 @@ import bpy
 import bpy_extras # ファイル保存ダイアログ（ExportHelper）を利用するためにインポート
 import math       # 回転の値をラジアンから度数法（Degree）に変換するために使用
 import gpu        # 描画周りを手広くサポートするモジュール
-import gpu_extras.batch # ジオメトリバッチ（シェーダ、トポロジー、頂点、インデックスをまとめたもの）を提供
+import gpu_extras.batch # ジオメトリバッチ（シェーダ、トポロジー、頂点、インデックスをまとめる）を提供
 import copy       # リストを丸ごとコピーして増やしたい場合に使用するPython標準モジュール
+import mathutils  # ベクトルや行列の演算をサポートするモジュール
 
 # ブレンダーのアドオン管理画面に表示される情報
 bl_info = {
@@ -43,22 +44,41 @@ class DrawCollider:
             [-0.5, +0.5, +0.5], # 左上奥
             [+0.5, +0.5, +0.5], # 右上奥
         ]
-        # 立方体のX,Y,Z方向サイズ（今回は一律2m）
-        size = [2.0, 2.0, 2.0]
 
         # 現在シーンのオブジェクトリストを走査し、全オブジェクトについて処理
         for object in bpy.context.scene.objects:
+            
+            # コライダープロパティがなければ、描画をスキップ
+            if not "collider" in object:
+                continue
+
+            # 中心点、サイズの変数を宣言
+            center = mathutils.Vector((0,0,0))
+            size = mathutils.Vector((2,2,2))
+
+            # プロパティから値を取得
+            center[0] = object["collider_center"][0]
+            center[1] = object["collider_center"][1]
+            center[2] = object["collider_center"][2]
+            size[0] = object["collider_size"][0]
+            size[1] = object["collider_size"][1]
+            size[2] = object["collider_size"][2]
+
             # 追加前の頂点数を記録（インデックス指定の基準にするため）
             start = len(vertices["pos"])
 
             # Boxの8頂点分回す
             for offset in offsets:
-                # オブジェクトの中心座標をコピー
-                pos = copy.copy(object.location)
+                # オブジェクトのローカルな中心座標（center）をベースにする
+                pos = copy.copy(center)
                 # 中心点を基準に各頂点ごとにずらす
                 pos[0] += offset[0] * size[0]
                 pos[1] += offset[1] * size[1]
                 pos[2] += offset[2] * size[2]
+                
+                # ローカル座標からワールド座標に変換（行列の掛け算 @ を使用）
+                pos = object.matrix_world @ pos
+
                 # 共有する頂点データリストに座標を追加
                 vertices["pos"].append(pos)
 
@@ -170,6 +190,16 @@ class MYADDON_OT_export_scene(bpy.types.Operator, bpy_extras.io_utils.ExportHelp
         if "file_name" in object:
             self.write_and_print(file, indent + "N %s" % object["file_name"])
 
+        # カスタムプロパティ 'collider' がある場合
+        if "collider" in object:
+            self.write_and_print(file, indent + "C %s" % object["collider"])
+            temp_str = indent + "CC %f %f %f"
+            temp_str %= (object["collider_center"][0],object["collider_center"][1],object["collider_center"][2])
+            self.write_and_print(file, temp_str)
+            temp_str = indent + "CS %f %f %f"
+            temp_str %= (object["collider_size"][0],object["collider_size"][1],object["collider_size"][2])
+            self.write_and_print(file, temp_str)
+
         # オブジェクトデータの区切りを示す 'END' を出力 
         self.write_and_print(file, indent + 'END')
         self.write_and_print(file, '')
@@ -216,7 +246,22 @@ class MYADDON_OT_add_filename(bpy.types.Operator):
         context.object["file_name"] = ""
         return {'FINISHED'}
 
-# --- UI：プロパティウィンドウ内のパネル拡張 ---
+# --- オペレータ5：カスタムプロパティ['collider']追加 ---
+class MYADDON_OT_add_collider(bpy.types.Operator):
+    """今選択中のオブジェクトにコライダー用のカスタムプロパティを一括追加するクラス"""
+    bl_idname = "myaddon.myaddon_ot_add_collider"
+    bl_label = "コライダー 追加"
+    bl_description = "['collider']カスタムプロパティを追加します"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        # 3つのプロパティを初期値付きで追加
+        context.object["collider"] = "BOX"
+        context.object["collider_center"] = mathutils.Vector((0,0,0))
+        context.object["collider_size"] = mathutils.Vector((2,2,2))
+        return {'FINISHED'}
+
+# --- UI：プロパティウィンドウ内のパネル拡張1 (FileName) ---
 class OBJECT_PT_file_name(bpy.types.Panel):
     """オブジェクトのプロパティウィンドウに表示される、動的に表示が切り替わるカスタムパネル"""
     bl_idname = "OBJECT_PT_file_name"
@@ -236,6 +281,29 @@ class OBJECT_PT_file_name(bpy.types.Panel):
         else:
             # プロパティがなければ、追加するためのオペレータボタンを表示 
             layout.operator(MYADDON_OT_add_filename.bl_idname)
+
+# --- UI：プロパティウィンドウ内のパネル拡張2 (Collider) ---
+class OBJECT_PT_collider(bpy.types.Panel):
+    """オブジェクトのプロパティウィンドウに表示される、コライダー設定用カスタムパネル"""
+    bl_idname = "OBJECT_PT_collider"
+    bl_label = "Collider"
+    bl_space_type = "PROPERTIES"
+    bl_region_type = "WINDOW"
+    bl_context = "object"
+
+    def draw(self, context):
+        """パネル内の項目を追加"""
+        layout = self.layout
+
+        # 'collider' プロパティがあるかチェック
+        if "collider" in context.object:
+            # 既にプロパティがあれば表示
+            layout.prop(context.object, '["collider"]', text="Type")
+            layout.prop(context.object, '["collider_center"]', text="Center")
+            layout.prop(context.object, '["collider_size"]', text="Size")
+        else:
+            # プロパティがなければ、追加ボタンを表示
+            layout.operator(MYADDON_OT_add_collider.bl_idname)
 
 # --- UI：トップバーに表示される独自メニュー ---
 class TOPBAR_MT_my_menu(bpy.types.Menu):
@@ -270,7 +338,9 @@ classes = (
     MYADDON_OT_create_ico_sphere,
     MYADDON_OT_export_scene,
     MYADDON_OT_add_filename,
+    MYADDON_OT_add_collider,
     OBJECT_PT_file_name,
+    OBJECT_PT_collider,
     TOPBAR_MT_my_menu,
 )
 
