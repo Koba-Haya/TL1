@@ -1,4 +1,5 @@
 import bpy
+import math # ラジアンから度数法への変換に使用 
 
 # ブレンダーに登録するアドオン情報
 bl_info = {
@@ -46,6 +47,51 @@ class MYADDON_OT_create_ico_sphere(bpy.types.Operator):
         self.report({'INFO'}, "ICO球を生成しました。")
         return {'FINISHED'}
 
+# --- オペレータ3：シーン出力 (トランスフォーム情報・親子関係表示) ---
+class MYADDON_OT_export_scene(bpy.types.Operator):
+    bl_idname = "myaddon.myaddon_ot_export_scene"
+    bl_label = "シーン出力"
+    bl_description = "シーン情報をExportします"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        # シーン情報をExportする処理 
+        print("シーン情報をExportします")
+
+        # シーン内の全オブジェクトについて走査 
+        for object in bpy.context.scene.objects:
+            # オブジェクトの種類と名前を表示 
+            print(object.type + " - " + object.name)
+
+            # ローカルトランスフォーム行列から平行移動、回転、スケーリングを抽出 
+            # 型は Vector, Quaternion, Vector
+            trans, rot, scale = object.matrix_local.decompose()
+
+            # 回転を Quaternion から Euler (3軸での回転角) に変換 
+            rot = rot.to_euler()
+
+            # ラジアンから度数法に変換 
+            rot.x = math.degrees(rot.x)
+            rot.y = math.degrees(rot.y)
+            rot.z = math.degrees(rot.z)
+
+            # トランスフォーム情報を表示 (C風の書式指定子を使用) 
+            print("Trans(%f,%f,%f)" % (trans.x, trans.y, trans.z))
+            print("Rot(%f,%f,%f)" % (rot.x, rot.y, rot.z))
+            print("Scale(%f,%f,%f)" % (scale.x, scale.y, scale.z))
+
+            # 親オブジェクトがある場合は名前を表示 
+            if object.parent:
+                print("Parent: " + object.parent.name)
+            
+            # オブジェクト間の区切り用空行 
+            print()
+
+        print("シーン情報をExportしました")
+        self.report({'INFO'}, "シーン情報をExportしました")
+        
+        return {'FINISHED'}
+
 # トップバーの拡張メニュークラス
 class TOPBAR_MT_my_menu(bpy.types.Menu):
     bl_idname = "TOPBAR_MT_my_menu" # クラスを識別するID
@@ -56,9 +102,11 @@ class TOPBAR_MT_my_menu(bpy.types.Menu):
     def draw(self, context):
         layout = self.layout
         
-        # 自作オペレータをメニューに追加
+        # 自作オペレータをメニューに追加 (資料11枚目)
         layout.operator(MYADDON_OT_stretch_vertex.bl_idname, text=MYADDON_OT_stretch_vertex.bl_label)
         layout.operator(MYADDON_OT_create_ico_sphere.bl_idname, text=MYADDON_OT_create_ico_sphere.bl_label)
+        # シーン走査オペレータを追加
+        layout.operator(MYADDON_OT_export_scene.bl_idname, text=MYADDON_OT_export_scene.bl_label)
         
         # 区切り線を追加
         layout.separator()
@@ -76,6 +124,7 @@ class TOPBAR_MT_my_menu(bpy.types.Menu):
 classes = (
     MYADDON_OT_stretch_vertex,
     MYADDON_OT_create_ico_sphere,
+    MYADDON_OT_export_scene,
     TOPBAR_MT_my_menu,
 )
 
