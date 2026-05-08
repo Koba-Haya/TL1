@@ -5,6 +5,7 @@ import gpu        # 描画周りを手広くサポートするモジュール
 import gpu_extras.batch # ジオメトリバッチ（シェーダ、トポロジー、頂点、インデックスをまとめる）を提供
 import copy       # リストを丸ごとコピーして増やしたい場合に使用するPython標準モジュール
 import mathutils  # ベクトルや行列の演算をサポートするモジュール
+import json       # JSON形式でのデータ出力に使用するモジュール
 
 # ブレンダーのアドオン管理画面に表示される情報
 bl_info = {
@@ -13,7 +14,7 @@ bl_info = {
     "version": (1, 0),
     "blender": (3, 3, 1),
     "location": "TopBar > MyMenu",
-    "description": "オブジェクトの階層構造を維持してファイル出力するレベルエディタ",
+    "description": "オブジェクトの階層構造を維持してJSONファイル出力するレベルエディタ",
     "warning": "",
     "wiki_url": "",
     "tracker_url": "",
@@ -82,7 +83,7 @@ class DrawCollider:
                 # 共有する頂点データリストに座標を追加
                 vertices["pos"].append(pos)
 
-            # ラインリスト（12本分）のインデックスデータを追加
+            # ラインリスト（12本分）のインデックスデータを追加 
             # 前面を構成する辺
             indices.append([start + 0, start + 1])
             indices.append([start + 2, start + 3])
@@ -101,7 +102,7 @@ class DrawCollider:
 
         # ビルトインのシェーダ（色指定のみの3D描画用）を取得
         shader = gpu.shader.from_builtin("UNIFORM_COLOR")
-        # バッチを作成（シェーダ、トポロジー"LINES"、頂点、インデックスを指定）
+        # バッチを作成（シェーダ、トポロジー"LINES"、頂点、インデックスを指定
         batch = gpu_extras.batch.batch_for_shader(shader, "LINES", vertices, indices=indices)
 
         # シェーダのパラメータ設定（水色）
@@ -146,90 +147,97 @@ class MYADDON_OT_create_ico_sphere(bpy.types.Operator):
         self.report({'INFO'}, "ICO球を生成しました。")
         return {'FINISHED'}
 
-# --- オペレータ3：シーン出力 (再帰によるツリー構造 & 整形出力) ---
+# --- オペレータ3：シーン出力 (JSON形式・再帰パッキング版) ---
 class MYADDON_OT_export_scene(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
-    """シーン内の全オブジェクトを親子関係を保ち、識別子を付けてファイル出力するクラス"""
+    """シーン内の全オブジェクトを親子関係を保ち、JSON形式でファイル出力するクラス"""
     bl_idname = "myaddon.myaddon_ot_export_scene"
     bl_label = "シーン出力"
-    bl_description = "現在のシーン情報を階層構造（インデント）付きで.sceneファイルに保存します"
+    bl_description = "現在のシーン情報を階層構造を維持したJSONファイルとして保存します"
     bl_options = {'REGISTER', 'UNDO'}
 
-    # ExportHelperで作成されるファイル保存ウィンドウのデフォルト拡張子
-    filename_ext = ".scene"
+    # 出力するファイルの拡張子を.jsonに設定
+    filename_ext = ".json"
 
-    def write_and_print(self, file, text):
-        """コンソールへの表示とファイルへの書き出しを同時に行い、自動で改行を付与する"""
-        print(text)           # Blenderのシステムコンソールに出力
-        file.write(text)      # オープン中のファイルに書き込み
-        file.write('\n')      # 改行コードを追加 
-
-    def parse_scene_recursive(self, file, object, level):
-        """深さ優先探索（DFS）を用いて、子オブジェクトを再帰的に解析・出力する"""
+    def parse_scene_recursive_json(self, data_parent, object, level):
+        """深さ優先探索（DFS）を用いて、オブジェクト1個分の情報をdictにパッキングし、親のリストに追加する"""
         
-        # 現在の階層（深さ）に応じてタブ文字を作成し、インデントを表現する
-        indent = '\t' * level
-
-        # ローダーでの判別を容易にするため、オブジェクトの種類を出力 
-        self.write_and_print(file, indent + object.type)
+        # シーンのオブジェクト1個分のjsonオブジェクト(dict)生成
+        json_object = dict()
+        # オブジェクト種類と名前を格納
+        json_object["type"] = object.type
+        json_object["name"] = object.name
 
         # トランスフォーム行列（matrix_local）から位置・回転・スケールを分離取得
         trans, rot, scale = object.matrix_local.decompose()
-        
         # 回転情報をクォータニオンからオイラー角に変換し、さらに度数法に変換
         rot = rot.to_euler()
         rot_x = math.degrees(rot.x)
         rot_y = math.degrees(rot.y)
         rot_z = math.degrees(rot.z)
 
-        # 識別子（T, R, S）を付け、半角スペース区切りで情報を出力 
-        self.write_and_print(file, indent + "T %f %f %f" % (trans.x, trans.y, trans.z))
-        self.write_and_print(file, indent + "R %f %f %f" % (rot_x, rot_y, rot_z))
-        self.write_and_print(file, indent + "S %f %f %f" % (scale.x, scale.y, scale.z))
-        
-        # カスタムプロパティ 'file_name' がある場合は識別子 'N' を付けて出力 
+        # トランスフォーム情報をディクショナリに登録
+        transform = dict()
+        transform["translation"] = (trans.x, trans.y, trans.z)
+        transform["rotation"] = (rot_x, rot_y, rot_z)
+        transform["scaling"] = (scale.x, scale.y, scale.z)
+        # まとめて1個分のjsonオブジェクトに登録
+        json_object["transform"] = transform
+
+        # カスタムプロパティ 'file_name' がある場合は追加
         if "file_name" in object:
-            self.write_and_print(file, indent + "N %s" % object["file_name"])
+            json_object["file_name"] = object["file_name"]
 
         # カスタムプロパティ 'collider' がある場合
         if "collider" in object:
-            self.write_and_print(file, indent + "C %s" % object["collider"])
-            temp_str = indent + "CC %f %f %f"
-            temp_str %= (object["collider_center"][0],object["collider_center"][1],object["collider_center"][2])
-            self.write_and_print(file, temp_str)
-            temp_str = indent + "CS %f %f %f"
-            temp_str %= (object["collider_size"][0],object["collider_size"][1],object["collider_size"][2])
-            self.write_and_print(file, temp_str)
+            collider = dict()
+            collider["type"] = object["collider"]
+            # mathutils.Vector型はそのままではエンコードできないため、to_list()でリストに変換する
+            collider["center"] = object["collider_center"].to_list()
+            collider["size"] = object["collider_size"].to_list()
+            json_object["collider"] = collider
 
-        # オブジェクトデータの区切りを示す 'END' を出力 
-        self.write_and_print(file, indent + 'END')
-        self.write_and_print(file, '')
+        # 1個分の情報をまとめた後、親オブジェクトの引数リストに子供として登録
+        data_parent.append(json_object)
 
         # 子オブジェクトが存在する場合、レベルを1つ上げて自分自身を呼び出す（再帰）
-        for child in object.children:
-            self.parse_scene_recursive(file, child, level + 1)
+        if len(object.children) > 0:
+            json_object["children"] = list()
+            for child in object.children:
+                self.parse_scene_recursive_json(json_object["children"], child, level + 1)
 
-    def export(self):
-        """ファイルオープンからルートオブジェクトの走査までを行うメインエクスポート処理"""
-        # 保存先パスはExportHelperによって self.filepath に格納されている
-        print("シーン情報出力開始... %r" % self.filepath)
+    def export_json(self):
+        """JSON形式でのパッキングからファイル書き出しまでを行うメイン処理"""
+        # 保存する情報をまとめるルートのdict（連想配列）を作成
+        json_object_root = dict()
+        json_object_root["name"] = "scene"
+        json_object_root["objects"] = list()
 
-        # ファイルを書き出しモード（wt: write text）で安全に開く
-        with open(self.filepath, "wt") as file:
-            file.write("SCENE\n")
+        # シーン内の全オブジェクトを走査してパック
+        for object in bpy.context.scene.objects:
+            # 親がいるオブジェクトは子として再帰的に呼ばれるため、ここではルートのみ処理 
+            if object.parent:
+                continue
+            # ルートオブジェクト（深さ0）として解析を開始 
+            self.parse_scene_recursive_json(json_object_root["objects"], object, 0)
 
-            # まずはシーン内の全オブジェクトの中から「親がいない（ルート）」ものだけを探す
-            for object in bpy.context.scene.objects:
-                # 親がいるオブジェクトは、その親の処理の中で再帰的に呼ばれるためここではスキップ 
-                if object.parent:
-                    continue
-                
-                # ルートオブジェクト（深さ0）として解析を開始
-                self.parse_scene_recursive(file, object, 0)
+        # オブジェクトをJSON文字列にエンコード（改行・インデント付き）
+        # ensure_ascii=Falseで日本語化けを防ぎ、indent=4で見やすく整形する 
+        json_text = json.dumps(json_object_root, ensure_ascii=False, cls=json.JSONEncoder, indent=4)
+        
+        # コンソールに表示（確認用）
+        print(json_text)
+
+        # ファイルをテキスト形式で安全に開く（UTF-8指定）
+        with open(self.filepath, "wt", encoding="utf-8") as file:
+            # JSON文字列を一括で書き込む
+            file.write(json_text)
 
     def execute(self, context):
-        # export処理を実行
-        self.export()
+        # JSON形式のエクスポート処理を実行
+        print("シーン情報をExportします")
+        self.export_json()
         self.report({'INFO'}, "シーン情報をExportしました")
+        print("シーン情報をExportしました")
         return {'FINISHED'}
 
 # --- オペレータ4：カスタムプロパティ['file_name']追加 ---
@@ -238,7 +246,6 @@ class MYADDON_OT_add_filename(bpy.types.Operator):
     bl_idname = "myaddon.myaddon_ot_add_filename"
     bl_label = "FileName 追加"
     bl_description = "['file_name']カスタムプロパティを追加します"
-    # Undoを可能にする
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -266,20 +273,19 @@ class OBJECT_PT_file_name(bpy.types.Panel):
     """オブジェクトのプロパティウィンドウに表示される、動的に表示が切り替わるカスタムパネル"""
     bl_idname = "OBJECT_PT_file_name"
     bl_label = "FileName"
-    bl_space_type = "PROPERTIES" # プロパティウィンドウを指定
+    bl_space_type = "PROPERTIES"
     bl_region_type = "WINDOW"
-    bl_context = "object"         # オブジェクトモード時に表示
+    bl_context = "object"
 
     def draw(self, context):
         """パネル内のUIレイアウトを描画し、プロパティの有無で表示を切り替える"""
         layout = self.layout
-        
-        # オブジェクトに 'file_name' カスタムプロパティがあるかチェック 
+        # オブジェクトに 'file_name' カスタムプロパティがあるかチェック
         if "file_name" in context.object:
-            # 既にプロパティがあれば、直接編集できるプロパティフィールドを表示 
+            # 既にプロパティがあれば、直接編集できるプロパティフィールドを表示
             layout.prop(context.object, '["file_name"]', text=self.bl_label)
         else:
-            # プロパティがなければ、追加するためのオペレータボタンを表示 
+            # プロパティがなければ、追加するためのオペレータボタンを表示
             layout.operator(MYADDON_OT_add_filename.bl_idname)
 
 # --- UI：プロパティウィンドウ内のパネル拡張2 (Collider) ---
@@ -294,10 +300,8 @@ class OBJECT_PT_collider(bpy.types.Panel):
     def draw(self, context):
         """パネル内の項目を追加"""
         layout = self.layout
-
         # 'collider' プロパティがあるかチェック
         if "collider" in context.object:
-            # 既にプロパティがあれば表示
             layout.prop(context.object, '["collider"]', text="Type")
             layout.prop(context.object, '["collider_center"]', text="Center")
             layout.prop(context.object, '["collider_size"]', text="Size")
@@ -313,8 +317,8 @@ class TOPBAR_MT_my_menu(bpy.types.Menu):
     bl_description = "自作のレベル編集機能にアクセスするメニュー"
 
     def draw(self, context):
+        """メニューの中身を描画"""
         layout = self.layout
-        
         # 各オペレータをメニューに追加
         layout.operator(MYADDON_OT_stretch_vertex.bl_idname, text=MYADDON_OT_stretch_vertex.bl_label)
         layout.operator(MYADDON_OT_create_ico_sphere.bl_idname, text=MYADDON_OT_create_ico_sphere.bl_label)
@@ -358,7 +362,8 @@ def register():
 def unregister():
     """アドオン無効化時に登録を解除する"""
     # アドオン無効化時に、3Dビューに登録した描画関数を登録解除する。
-    bpy.types.SpaceView3D.draw_handler_remove(DrawCollider.handle, "WINDOW")
+    if DrawCollider.handle:
+        bpy.types.SpaceView3D.draw_handler_remove(DrawCollider.handle, "WINDOW")
 
     # 登録時とは逆の順序でメニューを削除
     bpy.types.TOPBAR_MT_editor_menus.remove(TOPBAR_MT_my_menu.submenu)
