@@ -16,7 +16,7 @@ bl_info = {
     "category": "Object",
 }
 
-# --- オペレータ1：頂点を伸ばす ---
+# --- オペレータ1：頂点を伸ばす --- 
 class MYADDON_OT_stretch_vertex(bpy.types.Operator):
     """名前が 'Cube' のオブジェクトの特定の頂点を移動させるクラス"""
     bl_idname = "myaddon.myaddon_ot_stretch_vertex" 
