@@ -54,6 +54,10 @@ class MYADDON_OT_export_scene(bpy.types.Operator, bpy_extras.io_utils.ExportHelp
             collider["size"] = object["collider_size"].to_list()
             json_object["collider"] = collider
 
+        # --- カスタムプロパティ '無効オプション' がある場合は追加 ---
+        if "無効オプション" in object:
+            json_object["無効オプション"] = object["無効オプション"]
+
         # 1個分の情報をまとめた後、親オブジェクトの引数リストに子供として登録
         data_parent.append(json_object)
 

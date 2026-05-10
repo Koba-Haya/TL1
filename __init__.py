@@ -9,6 +9,8 @@ from . import file_name
 from . import collider
 from . import draw_collider
 from . import my_menu
+from . import add_disabled
+from . import disabled
 
 # ブレンダーのアドオン管理画面に表示される情報
 bl_info = {
@@ -31,8 +33,10 @@ classes = (
     export_scene.MYADDON_OT_export_scene,
     add_filename.MYADDON_OT_add_filename,
     add_collider.MYADDON_OT_add_collider,
+    add_disabled.MYADDON_OT_add_disabled,
     file_name.OBJECT_PT_file_name,
     collider.OBJECT_PT_collider,
+    disabled.OBJECT_PT_disabled,
     my_menu.TOPBAR_MT_my_menu,
 )
 
