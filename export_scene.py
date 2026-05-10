@@ -20,48 +20,51 @@ class MYADDON_OT_export_scene(bpy.types.Operator, bpy_extras.io_utils.ExportHelp
         
         # シーンのオブジェクト1個分のjsonオブジェクト(dict)生成
         json_object = dict()
+
         # オブジェクト種類と名前を格納
-        json_object["type"] = object.type
+        # 資料の改造案：カスタムプロパティ["type"]がある場合はそれを優先、なければ標準のtypeを使う
+        if "type" in object:
+            json_object["type"] = object["type"]
+        else:
+            json_object["type"] = object.type
+            
         json_object["name"] = object.name
 
         # トランスフォーム行列（matrix_local）から位置・回転・スケールを分離取得
         trans, rot, scale = object.matrix_local.decompose()
         # 回転情報をクォータニオンからオイラー角に変換し、さらに度数法に変換
         rot = rot.to_euler()
-        rot_x = math.degrees(rot.x)
-        rot_y = math.degrees(rot.y)
-        rot_z = math.degrees(rot.z)
+        rot.x = math.degrees(rot.x)
+        rot.y = math.degrees(rot.y)
+        rot.z = math.degrees(rot.z)
 
-        # トランスフォーム情報をディクショナリに登録
+        # トランスフォーム情報を辞書に格納
         transform = dict()
-        # ゲームエンジン側の座標系（例：Yが上、Zが奥）に合わせる場合はここで軸を入れ替える
         transform["translation"] = (trans.x, trans.y, trans.z)
-        transform["rotation"] = (rot_x, rot_y, rot_z)
+        transform["rotation"] = (rot.x, rot.y, rot.z)
         transform["scaling"] = (scale.x, scale.y, scale.z)
-        # まとめて1個分のjsonオブジェクトに登録
         json_object["transform"] = transform
 
-        # カスタムプロパティ 'file_name' がある場合は追加
+        # カスタムプロパティ 'file_name' があれば追加
         if "file_name" in object:
             json_object["file_name"] = object["file_name"]
 
-        # カスタムプロパティ 'collider' がある場合
+        # カスタムプロパティ 'collider' があればコライダー情報を追加
         if "collider" in object:
             collider = dict()
             collider["type"] = object["collider"]
-            # mathutils.Vector型はそのままではエンコードできないため、to_list()でリストに変換する
-            collider["center"] = object["collider_center"].to_list()
-            collider["size"] = object["collider_size"].to_list()
+            collider["center"] = object["collider_center"].to_tuple()
+            collider["size"] = object["collider_size"].to_tuple()
             json_object["collider"] = collider
 
-        # --- カスタムプロパティ '無効オプション' がある場合は追加 ---
+        # カスタムプロパティ '無効オプション' があれば追加
         if "無効オプション" in object:
-            json_object["無効オプション"] = object["無効オプション"]
+            json_object["disabled"] = object["無効オプション"]
 
-        # 1個分の情報をまとめた後、親オブジェクトの引数リストに子供として登録
+        # 自身の情報を親のリストに追加
         data_parent.append(json_object)
 
-        # 子オブジェクトが存在する場合、レベルを1つ上げて自分自身を呼び出す（再帰）
+        # 子オブジェクトがあれば、さらにその下層を走査する（再帰）
         if len(object.children) > 0:
             json_object["children"] = list()
             for child in object.children:
@@ -90,15 +93,14 @@ class MYADDON_OT_export_scene(bpy.types.Operator, bpy_extras.io_utils.ExportHelp
         # コンソールに表示（確認用）
         print(json_text)
 
-        # ファイルをテキスト形式で安全に開く（UTF-8指定）
-        with open(self.filepath, "wt", encoding="utf-8") as file:
-            # JSON文字列を一括で書き込む
-            file.write(json_text)
+        # ファイルに書き出し
+        with open(self.filepath, "w", encoding="utf-8") as f:
+            f.write(json_text)
 
     def execute(self, context):
-        # JSON形式のエクスポート処理を実行
-        print("シーン情報をExportします")
+        """実行時に呼ばれるメイン関数"""
+        print("シーン情報をJSON出力します...")
         self.export_json()
-        self.report({'INFO'}, "シーン情報をExportしました")
-        print("シーン情報をExportしました")
+        print("出力完了:" + self.filepath)
+        self.report({'INFO'}, "シーン情報をJSON出力しました")
         return {'FINISHED'}

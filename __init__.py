@@ -1,5 +1,5 @@
 import bpy
-# 分割した自作モジュールを相対インポートで結合
+# 分割した自作モジュールを相対インポートで結合（これまでのファイルをすべて維持）
 from . import stretch_vertex
 from . import create_ico_sphere
 from . import export_scene
@@ -11,6 +11,7 @@ from . import draw_collider
 from . import my_menu
 from . import add_disabled
 from . import disabled
+from . import spawn # 追加
 
 # ブレンダーのアドオン管理画面に表示される情報
 bl_info = {
@@ -19,7 +20,7 @@ bl_info = {
     "version": (1, 0),
     "blender": (3, 3, 1),
     "location": "TopBar > MyMenu",
-    "description": "オブジェクトの階層構造を維持してJSONファイル出力するレベルエディタ",
+    "description": "オブジェクトの階層構造を維持してJSON file 出力するレベルエディタ",
     "warning": "",
     "wiki_url": "",
     "tracker_url": "",
@@ -38,6 +39,9 @@ classes = (
     collider.OBJECT_PT_collider,
     disabled.OBJECT_PT_disabled,
     my_menu.TOPBAR_MT_my_menu,
+    # 新しく追加したオペレータを登録
+    spawn.MYADDON_OT_spawn_import_symbol,
+    spawn.MYADDON_OT_spawn_create_symbol,
 )
 
 def register():
@@ -61,7 +65,7 @@ def unregister():
 
     # 登録時とは逆の順序でメニューを削除
     bpy.types.TOPBAR_MT_editor_menus.remove(my_menu.TOPBAR_MT_my_menu.submenu)
-    # クラスの登録解除
+    # クラスの登録解除（逆順）
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
     print("レベルエディタが無効化されました。")
